@@ -554,6 +554,7 @@ def pdf_processing(pdf_content):
         #         gst_components.append(f"{tax_type}: {value}")
         #         del output_data[tax_type]
 
+
         # output_data["GST_AMOUNT"] = ", ".join(gst_components) if gst_components else None
 
         # if output_data["GST_AMOUNT"] == None or output_data["GST_AMOUNT"] == "0.00" or output_data["GST_AMOUNT"] == 0.00:
