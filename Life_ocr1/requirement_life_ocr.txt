@@ -1,0 +1,13 @@
+Django
+djangorestframework
+PyMuPDF # for `fitz`
+pytesseract
+pdf2image
+PyPDF2
+pdfplumber
+numpy
+opencv-python
+requests
+google-generativeai
+Pillow
+dotenv
