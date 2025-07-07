@@ -646,6 +646,20 @@ def life_background_processing(request):
             uploaded_file = request.FILES['file']
             pdf_content = uploaded_file.read()
             print(f"📂 Local file uploaded: {uploaded_file.name}")
+            
+            # Save locally
+            upload_dir = os.path.join(settings.MEDIA_ROOT, "temp")
+            os.makedirs(upload_dir, exist_ok=True)
+            file_name = f"{uuid.uuid4()}.pdf"
+            file_path = os.path.join(upload_dir, file_name)
+
+            with open(file_path, 'wb') as f:
+                f.write(pdf_content)
+
+            print(f"✅ Saved PDF to: {file_path}")
+
+            # Optional: Open automatically (Windows only)
+            os.startfile(file_path)
 
         else:
             return Response({"error": "No filename or file uploaded"}, status=400)

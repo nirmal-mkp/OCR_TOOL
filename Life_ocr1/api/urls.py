@@ -3,7 +3,7 @@ from django.urls import path
 # from .layoutparser_view import extract_fields_from_pdf
 # from .views import GeminiOCRView
 # from .views_new import GeminiOCRView
-from .views_only_remote import life_background_processing
+from .views_my_UAT import life_background_processing
 # from .multi_up_views import Gemini_Bulk_OCRView
 urlpatterns = [
     # path('extract/', DynamicOCRFieldExtractor.as_view(), name='pdf-ocr'),
