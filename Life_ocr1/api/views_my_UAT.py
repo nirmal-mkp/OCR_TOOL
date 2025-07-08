@@ -4,6 +4,7 @@ import time
 import json
 import requests
 import pytesseract
+from PIL import Image
 import fitz # PyMuPDF
 import cv2
 import numpy as np
@@ -30,8 +31,8 @@ import logging
 
 logging.getLogger("fitz").setLevel(logging.ERROR)
 load_dotenv()  # Only needed if using .env files during local dev
-# ✅ Configure MODELS
 
+# ✅ Configure MODELS
 # print("Loaded keys:", os.getenv("GOOGLE_API_KEYS"))
 MODELS = ["gemini-1.5-flash","models/gemini-1.5-flash"] #,"gemini-2.5-flash-lite-preview-06-17"]
 MODEL_CONFIG = {
@@ -48,7 +49,7 @@ field_keyword_map = {
     "Insurance_Company_Name": ["Insurance Company", "Insurer Name"],
     "Business_Category":["Business Category"],
     "Insurance_Company_Branch_Name":["Insurance Company Branch Name"],
-    "Insurance_Company_Address": ["Insurance Company Address"],
+    "Insurance_Company_Address": ["Insurance Company Address","Regd. Office"],
     "Plan_Name" : ["Product Name","Plan Name","Name of Product","Base Plan"],
     "Sub_Plan_Name" : ["Plan Option","Sub Plan Name"],
     "Addon_Cover" : ["Addon Cover"],
@@ -60,13 +61,13 @@ field_keyword_map = {
     "Proposer_Gender": ["Gender(M/F/Tg)","Proposer Gender"],
     "Proposer_Aadhaar_No": ["Aadhaar No"],
     "Is_Pan_Card_available_?": ["Is Pan Card available ?"],
-    "Proposer_PAN_NO":["PAN* (Proposer)","PAN NO"],
+    "Proposer_PAN_Number":["PAN* (Proposer)","PAN NO"],
     "Proposer_Height":["What is your height?","Proposer Height"],
     "Proposer_Weight":["What is your weight (in kg)?","Proposer Weight"],
     "Proposer_Education":["Proposer Education"],
     "Proposer_Email_Id": ["Proposer Email Id"],
-    "Proposer_Phone_No": ["Proposer Phone No"],
-    "Proposer_Alternate_Phone_No":["Telephone No(R)","Alternate Mobile No"],
+    "Proposer_Phone_Number": ["Proposer Phone No"],
+    "Proposer_Alternate_Phone_Number":["Telephone No(R)","Alternate Mobile No"],
     "Proposer_Permanent_Address": ["Permanent Address","Permanent Address (If different from correspondence address)/ Overseas residential","Customer Address", "Proposer Address"],
     "Proposer_Communication_Address": ["Correspondence Address","Proposer Communication Address"],
     "Proposer_State":["State"],
@@ -94,7 +95,7 @@ field_keyword_map = {
 
     # Premium Details
     "PPT":["Premium Payment(in years)","Premium Payment","Premium Paying Term"],
-    "PT":["Policy Term(in years)","Policy Term"],
+    "PT":["Policy Term(in years)","Policy Term","Coverage Term"],
     "Frequency":["Frequency","Income Benefit Frequency","For Sanchay Par Advantage, also choose survival benefit payout frequency","Premium Paying Mode"],
     "Number_Of_Due_Collected_In_Months":["Number Of Due Collected In Months"],
     "Total_Premium_With_Tax|Collected_premium":["Total Premium (INR)","Total Premium With Tax / Collected premium","Amount in (INR)","Amount of Instalment Premium"],
@@ -115,8 +116,10 @@ field_keyword_map = {
     "Customer_Name_As_Per_Bank_Account":["Customer Name as per Bank Account"],
   
     # Policy Details
-    "Insurance_Company_Application_No":["Application No","Proposal No","Quotation No","Quotation number","Insurance Company Application No"],
+    "Insurance_Company_Application_Number":["Application No","Proposal No","Quotation No","Quotation number","Insurance Company Application No","APPLICATION ID"],
     "Policy_Number": ["Policy Number", "Policy No", "Application No", "Proposal No"],
+    
+    # Additional Details
     "Policy_Issued_Date": ["**All figures as on","Policy Issued Date", "Date of Issue", "Issue Date"],
     "Policy_From_Date": ["Risk Start Date", "Coverage Start"],
     "Policy_To_Date": ["Risk End Date", "Coverage End"],
@@ -194,8 +197,7 @@ def extract_text_from_all_methods(pdf_content):
         pdf_stream.seek(0)
         images = convert_from_bytes(pdf_stream.read(), dpi=300)
         for image in images:
-            img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-            ocr_text = pytesseract.image_to_string(img_cv, config="--psm 6")
+            ocr_text = pytesseract.image_to_string(image, config="--psm 6")
             if ocr_text:
                 pytesseract_text += ocr_text.replace("\n", " ").strip() + " "
         if pytesseract_text.strip():
@@ -311,33 +313,35 @@ Return JSON with exactly these keys: {list(field_keyword_map.keys())}
  1. JSON Order
     - Don't Change the JSON Order
 
- 2. Customer
-    - if customer age is not specified calculate the age from date of birth
+ 2. Proposer Details
+    - dont't take the life assured Height, Weight for Proposer_Height, Proposer_Weight
+    - Don't leave a space in between pan number
  
  3. Dates
     - All Dates in YYYY-MM-DD
     - if can't find Policy Issued Date it will be available somewhere alone 
  
- 4. GST
+ 4. Payment Details
     - Add these SGST, CGST, IGST values if available and return added amount
  
  5. Amounts
     - Remove Comma from all amounts
  
  6. Business
-    - Business Category always should be life
-    - Business Type always should be fresh 
+    - Business Category always should be Life
+    - Business Type always should be Fresh 
  
  7. Appointee
     - If the Appointee details not available then consider second Nominee details as Appointee details, fill the Appointee details with Nominee details   
  
  8. Policy Details
-    - **HDFC proposal form**
+    - ** HDFC proposal form **
         1. If you can't find application number for Insurance_Company_Application_No consider the number in the starting of the text like 13 digit number ** this is an example(1320404820466) ** 
- 
+    Insurance_Company_Application_Number always a numeric value
+    - 
  9. Address
     - Don't take Proposer_Communication_Address or Proposer_Permanent_Address as Insurance_Company_Address.  Insurance_Company_Address is always differ from that
-
+    - Don't include the phone number and email  in address
     - ** ICICI PRUDENTIAL LIFE INSURANCE **
         1. Replace "SAME AS MAILING ADDRESS" for Proposer_Permanent_Address with Proposer_Communication_Address
  
@@ -347,13 +351,10 @@ Return JSON with exactly these keys: {list(field_keyword_map.keys())}
  11. Phone Number
     - Remove country code from phone number
 
- 12. Height, Weight
-    - dont't take the life assured Height, Weight for Proposer_Height, Proposer_Weight
-
- 13. Insurance Company Details
-    - ** Insurance_Company_Branch_Name **
-        i. Find the city from Insurance_Company_Address value and consider that as Insurance_Company_Branch_Name 
-
+ 12. Life Assured Details
+    - ** AXIS MAX LIFE INSURANCE LIMITED **
+        i. Dont't take Father's / Husband Name key word as Life assured name
+        ii. if the values are not present in this *LIFE TO BE INSURED(if other than proposer)* section consider Proposer details as the Life assured details
 Text:
 {text}
 """
@@ -362,6 +363,7 @@ Text:
         response = model.generate_content(prompt)
         cleaned = re.sub(r"```json|```", "", response.text).strip()
         parsed = json.loads(cleaned)
+        print("Parsed::::",parsed)
         # print("cleaned",cleaned)
         # print("🧾 Gemini raw response:\n", response.text)
         # print("parsed",parsed)
@@ -411,7 +413,7 @@ Text:
 
 def extract_fields_from_text(combined_full_text, field_keyword_map):
     result = query_gemini_with_keywords(combined_full_text, field_keyword_map)
-
+    print("result:::", result)
     # 🔴 Stop and return error if Gemini failed
     if "error" in result:
         print("❌ Gemini error:", result.get("raw"))
@@ -420,7 +422,7 @@ def extract_fields_from_text(combined_full_text, field_keyword_map):
     # 🟢 Ensure all expected fields exist in the output
     data = {key: result.get(key, None) for key in field_keyword_map}
     
-    print("📄 Extracted Data:", data)
+    print("📄 Extracted Data:::", data)
     return data
 
 def reformat_date(date_string):
@@ -438,10 +440,10 @@ def reformat_date(date_string):
         return date_string.strip()
     return date_string
 
-def str_to_int(str_value):
+def str_to_float(str_value):
     try:
-        int_value=int(str_value)
-        return int_value
+        float_value=float(str_value)
+        return float_value
     except(ValueError, TypeError):
         return 0
 def set_status_based_on_date(output_data, date_field, status_field, past_or_today_value="Issued", future_value="No"):
@@ -476,7 +478,7 @@ def pdf_processing(pdf_content):
     try:
         # 🔹 Step 1: Extract OCR text first
         combined_full_text = extract_text_from_all_methods(pdf_content)
-        # print("combined_full_text::::",combined_full_text)
+        print("combined_full_text::::",combined_full_text)
 
         # 🔹 Step 2: Check for keyword (optional)
         # if "vizza" not in combined_full_text.lower():
@@ -488,7 +490,7 @@ def pdf_processing(pdf_content):
         # output_data = extract_fields_from_chunks(chunks, field_keyword_map)
 
         output_data = extract_fields_from_text(combined_full_text, field_keyword_map)
-
+        print("output_data_before_my_modification:::", output_data)
         if "error" in output_data:
             return Response(output_data, status=500)        
 
@@ -496,15 +498,21 @@ def pdf_processing(pdf_content):
         output_data["Policy_From_Date"] = reformat_date(output_data.get("Policy_From_Date"))
         output_data["Policy_To_Date"] = reformat_date(output_data.get("Policy_To_Date"))
         
-        output_data = set_status_based_on_date(output_data,date_field="Policy_Issued_Date",status_field="Policy_Status",past_or_today_value="Issued",future_value="No")
-        
-        if output_data.get("Agency_Name") != None and "vizza" in output_data.get("Agency_Name").lower():
-            output_data["Agency_Name"] = "VIZZA INSURANCE BROKING SERVICES PRIVATE LIMITED"            
-        else:
-            output_data["Agency_Name"] = None
-            output_data["Agency_Code"] = None
+        output_data = set_status_based_on_date(
+            output_data,
+            date_field="Policy_Issued_Date",
+            status_field="Policy_Status",
+            past_or_today_value="Issued",
+            future_value="No")
 
-        if output_data.get("Proposer_PAN_NO") != None:
+        agency = output_data.get("Agency_Name")
+        if agency:
+            if "vizza" in agency.lower():
+                output_data["Agency_Name"] = "VIZZA INSURANCE BROKING SERVICES PRIVATE LIMITED"
+            else:
+                output_data["Agency_Name"] =  None 
+            
+        if output_data.get("Proposer_PAN_Number") != None:
             output_data["Is_Pan_Card_available_?"] = "Yes"
         else:
             output_data["Is_Pan_Card_available_?"] = "No"
@@ -521,32 +529,54 @@ def pdf_processing(pdf_content):
             if output_data.get("Life_Assured_Gender") == "l":
                 output_data["Life_Assured_Gender"] = "Female"
         
-        phone_no = output_data.get('Proposer_Phone_No') 
-        if isinstance(phone_no, str) and ("*" in phone_no or "x" in phone_no or "X" in phone_no):
-            output_data['Proposer_Phone_No'] = None
-        else:
-            output_data['Proposer_Phone_No'] = phone_no 
+        phone_no = output_data.get('Proposer_Phone_Number') 
+        if phone_no:
+            if isinstance(phone_no, str) and ("*" in phone_no or "x" in phone_no or "X" in phone_no):
+                output_data['Proposer_Phone_Number'] = None
+            else:
+                phone_no = phone_no.replace("+91","").replace("+ 91","")
+                output_data['Proposer_Phone_Number'] = phone_no 
 
-        alternate_phone_no = output_data.get('Proposer_Alternate_Phone_No') 
+        alternate_phone_no = output_data.get('Proposer_Alternate_Phone_Number') 
         if isinstance(  alternate_phone_no, str) and ("*" in   alternate_phone_no or "x" in   alternate_phone_no or "X" in   alternate_phone_no):
-            output_data['Proposer_Alternate_Phone_No'] = None
+            output_data['Proposer_Alternate_Phone_Number'] = None
         else:
-            output_data['Proposer_Alternate_Phone_No'] = alternate_phone_no  
+            output_data['Proposer_Alternate_Phone_Number'] = alternate_phone_no  
 
         email_id = output_data.get('Proposer_Email_Id')
-        if isinstance(email_id, str) and ("**" in email_id or "xx" in email_id or "XX" in email_id,"*" in email_id ):
+        if isinstance(email_id, str) and (
+            "**" in email_id or 
+            "xx" in email_id or 
+            "XX" in email_id or 
+            "*" in email_id
+        ):
             output_data['Proposer_Email_Id'] = None
         else:
             output_data['Proposer_Email_Id'] = email_id 
               
-        names = output_data["Proposer_Name"].lower()
-        replace_chars = ["mr","mrs","mr/mrs"]
-        for i in replace_chars:
-            names = names.replace(i,"")
-        output_data["Proposer_Name"] = names.strip().title()
+        names = output_data.get("Proposer_Name")
+        print("nAMES",names)
+        if names:
+            names = names.lower()
+            replace_chars = ["mr","mrs","mr/mrs"]
+            for chars in replace_chars:
+                names = names.replace(chars,"")
+            output_data["Proposer_Name"] = names.strip().title()
 
         # Annualised_Net_Premium
-        output_data["Annualised_Net_Premium"] = str(str_to_int(output_data["Total_Premium_With_Tax|Collected_premium"])*12-str_to_int(output_data["GST_AMOUNT"])*12)
+        if output_data.get("Annualised_Net_Premium") == None and output_data.get("Total_Premium_With_Tax|Collected_premium") != None and output_data.get('GST_AMOUNT') != None:
+            output_data["Annualised_Net_Premium"] = str(str_to_float(output_data["Total_Premium_With_Tax|Collected_premium"])*12 - str_to_float(output_data["GST_AMOUNT"])*12)
+
+        # Total_Premium_Without_Tax
+        if output_data.get("Total_Premium_Without_Tax") == None and output_data.get("Total_Premium_With_Tax|Collected_premium") != None and output_data.get('GST_AMOUNT') != None:
+            output_data["Total_Premium_Without_Tax"] = str(str_to_float(output_data.get("Total_Premium_With_Tax|Collected_premium")) - str_to_float(output_data.get('GST_AMOUNT')))
+        else:
+            output_data['Total_Premium_Without_Tax'] = output_data.get('Total_Premium_Without_Tax')
+        # GST_AMOUNT
+        if output_data.get("GST_AMOUNT") == None and output_data.get("Total_Premium_With_Tax|Collected_premium") != None and output_data.get('Total_Premium_Without_Tax') != None:
+            output_data["GST_AMOUNT"] = str(str_to_float(output_data.get("Total_Premium_With_Tax|Collected_premium")) - str_to_float(output_data.get('Total_Premium_Without_Tax')))
+        else:
+            output_data['GST_AMOUNT'] = output_data.get('GST_AMOUNT')
         # gst_components = []
         # for tax_type in ["CGST", "SGST", "IGST"]:
         #     value = output_data.get(tax_type)
@@ -554,119 +584,97 @@ def pdf_processing(pdf_content):
         #         gst_components.append(f"{tax_type}: {value}")
         #         del output_data[tax_type]
 
-
         # output_data["GST_AMOUNT"] = ", ".join(gst_components) if gst_components else None
 
         # if output_data["GST_AMOUNT"] == None or output_data["GST_AMOUNT"] == "0.00" or output_data["GST_AMOUNT"] == 0.00:
-        #     output_data["GST_AMOUNT"] = str(str_to_int(output_data["Premium_Without_Tax"]) - str_to_int(output_data["Annualised_Net_Premium"]))
+        #     output_data["GST_AMOUNT"] = str(str_to_float(output_data["Premium_Without_Tax"]) - str_to_float(output_data["Annualised_Net_Premium"]))
         
-        print(output_data)
+        print("Final_Output_data",output_data)
         return Response(output_data)
     except Exception as e:
         print("❌ Error in background processing task:", str(e))
-        return Response({"error": "Processing failed", "details": str(e)}, status=500)
+        return Response({"error": "Error in background processing task", "details": str(e)}, status=500)
     
-   
+
+# ✅ Final Django View
+@csrf_exempt
+@api_view(["POST"])
+def life_background_processing(request):
+    # Remote URL using filename
+    filename = request.data.get("file")
+    base_url = "https://erpproject.blr1.cdn.digitaloceanspaces.com/live/life_salessheet/"
+    # base_url = "https://erpproject.blr1.digitaloceanspaces.com/live/general_datasheet/"
+
+    try:
+        if filename:
+            file_url = base_url + quote(filename)
+            print("📎 PDF URL:", file_url)
+            response = requests.get(file_url)
+            # print(response)
+            if response.status_code != 200:
+                print("Failed to download pdf")
+                return Response({"error": "Failed to download PDF"}, status=400)
+
+        pdf_content = response.content
+        # threading.Thread(target=pdf_processing, args=(temp_path,)).start()
+        # return Response({"Message":"Upload started, Proccessing in background..."},status=status.HTTP_202_ACCEPTED)
+
+        return pdf_processing(pdf_content)
+    
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
 
 # ✅ Final Django View
 # @csrf_exempt
 # @api_view(["POST"])
-# def life_background_processing(data):
-#     # Remote URL using filename
-#     filename = data["file"]
-#     base_url = "https://erpproject.blr1.cdn.digitaloceanspaces.com/live/life_salessheet/"
-#     # base_url = "https://erpproject.blr1.digitaloceanspaces.com/live/general_datasheet/"
-
-#     try:
-#         if filename:
-#             file_url = base_url + quote(filename)
-#             print("📎 PDF URL:", file_url)
-#             response = requests.get(file_url)
-#             # print(response)
-#             if response.status_code != 200:
-#                 print("Failed to download pdf")
-#                 return Response({"error": "Failed to download PDF"}, status=400)
-
-#         pdf_content = response.content
-#         # threading.Thread(target=pdf_processing, args=(temp_path,)).start()
-#         # return Response({"Message":"Upload started, Proccessing in background..."},status=status.HTTP_202_ACCEPTED)
-
-#         return pdf_processing(pdf_content)
-    
-#     except Exception as e:
-#         return Response({"error": str(e)}, status=500)
-   
-# ✅ Final Django View
-# @api_view(["POST"])
 # def life_background_processing(request):
-
-#     # Remote URL using filename
-#     filename = request.data.get("filename")
 #     base_url = "https://erpproject.blr1.cdn.digitaloceanspaces.com/live/life_salessheet/"
-#     # base_url = "https://erpproject.blr1.digitaloceanspaces.com/live/general_datasheet/"
+#     pdf_content = None
 
 #     try:
+#         # Case 1: Remote PDF from URL
+#         filename = request.data.get("filename")
 #         if filename:
 #             file_url = base_url + quote(filename)
 #             print("📎 PDF URL:", file_url)
 #             response = requests.get(file_url)
 #             print(response)
 #             if response.status_code != 200:
-#                 print("Failed to download pdf")
+#                 print("❌ Failed to download PDF")
 #                 return Response({"error": "Failed to download PDF"}, status=400)
+#             pdf_content = response.content
 
-#         pdf_content = response.content
-#         # threading.Thread(target=pdf_processing, args=(temp_path,)).start()
-#         # return Response({"Message":"Upload started, Proccessing in background..."},status=status.HTTP_202_ACCEPTED)
+#         # Case 2: Local PDF from upload (form-data file)
+#         elif 'file' in request.FILES:
+#             uploaded_file = request.FILES['file']
+#             pdf_content = uploaded_file.read()
+#             # print(f"📂 Local file uploaded: {uploaded_file.name}")
+            
+#             # Save locally
+#             upload_dir = os.path.join(settings.MEDIA_ROOT, "temp")
+#             os.makedirs(upload_dir, exist_ok=True)
+#             file_name = f"{uuid.uuid4()}.pdf"
+#             file_path = os.path.join(upload_dir, file_name)
 
+#             with open(file_path, 'wb') as f:
+#                 f.write(pdf_content)
+
+#             print(f"✅ Saved PDF to: {file_path}")
+
+#             # Optional: Open automatically (Windows only)
+#             os.startfile(file_path)
+
+#         else:
+#             return Response({"error": "No filename or file uploaded"}, status=400)
+
+#         # ✅ Proceed to process the PDF
 #         return pdf_processing(pdf_content)
-    
+
 #     except Exception as e:
+#         print("❌ Exception during processing:", str(e))
 #         return Response({"error": str(e)}, status=500)
 
-@api_view(["POST"])
-def life_background_processing(request):
-    base_url = "https://erpproject.blr1.cdn.digitaloceanspaces.com/live/life_salessheet/"
-    pdf_content = None
-
-    try:
-        # Case 1: Remote PDF from URL
-        filename = request.data.get("filename")
-        if filename:
-            file_url = base_url + quote(filename)
-            print("📎 PDF URL:", file_url)
-            response = requests.get(file_url)
-            if response.status_code != 200:
-                print("❌ Failed to download PDF")
-                return Response({"error": "Failed to download PDF"}, status=400)
-            pdf_content = response.content
-
-        # Case 2: Local PDF from upload (form-data file)
-        elif 'file' in request.FILES:
-            uploaded_file = request.FILES['file']
-            pdf_content = uploaded_file.read()
-            print(f"📂 Local file uploaded: {uploaded_file.name}")
-            
-            # Save locally
-            upload_dir = os.path.join(settings.MEDIA_ROOT, "temp")
-            os.makedirs(upload_dir, exist_ok=True)
-            file_name = f"{uuid.uuid4()}.pdf"
-            file_path = os.path.join(upload_dir, file_name)
-
-            with open(file_path, 'wb') as f:
-                f.write(pdf_content)
-
-            print(f"✅ Saved PDF to: {file_path}")
-
-            # Optional: Open automatically (Windows only)
-            os.startfile(file_path)
-
-        else:
-            return Response({"error": "No filename or file uploaded"}, status=400)
-
-        # ✅ Proceed to process the PDF
-        return pdf_processing(pdf_content)
-
-    except Exception as e:
-        print("❌ Exception during processing:", str(e))
-        return Response({"error": str(e)}, status=500)
+#     finally:
+#         if os.path.exists(file_path):
+#             os.remove(file_path)
