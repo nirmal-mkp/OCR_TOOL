@@ -106,7 +106,7 @@ field_keyword_map = {
     "Total_Sum_Assured":["Sum Assured(in INR)","Total Sum Assured"],
 
     # Payment Details
-    "Type_of_Payment":["Mode Of Deposit","Mode of Payment","Premium Payment Method"],
+    "Type_of_Payment":["Payment by","Mode Of Deposit","Mode of Payment","Premium Payment Method"],
     "Bank_name":["Bank Name"],
     "Bank_Branch_Name":["Bank Branch","Bank Branch Name"],
     "Bank_Account_Number":["Account Number","Bank Account Number"],
@@ -161,7 +161,6 @@ def upload_pdf_to_gemini(pdf_content, model_name=None):
     """Uploads a PDF (binary data) to Gemini and extracts text."""
     
     model = model_name if model_name else setup_model()
-    print(f"🚀 Using OCR model: {model}")
 
     try:
         response = model.generate_content(
@@ -197,11 +196,14 @@ def extract_text_from_all_methods(pdf_content):
         pdf_stream.seek(0)
         images = convert_from_bytes(pdf_stream.read(), dpi=300)
         for image in images:
+            # img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
             ocr_text = pytesseract.image_to_string(image, config="--psm 6")
             if ocr_text:
                 pytesseract_text += ocr_text.replace("\n", " ").strip() + " "
         if pytesseract_text.strip():
             print("✅ OCR pytesseract_text found")
+        if "AXIS MAX LIFE INSURANCE LIMITED" in pytesseract_text.upper():
+            return upload_pdf_to_gemini(pdf_content)
     except Exception as e:
         print("❌ OCR with pytesseract failed:",str(e))
 
@@ -282,6 +284,10 @@ def extract_text_from_all_methods(pdf_content):
 
 # ✅ Gemini Query with Keywords
 def query_gemini_with_keywords(text, field_keyword_map):
+    if not text:
+        print("❌ No text found. Skipping Gemini Process")
+        return {"Erorr":"No text to Process"}
+    
     selected_key = random.choice(API_KEYS)
     genai.configure(api_key=selected_key)
     model = genai.GenerativeModel("gemini-2.5-flash-lite-preview-06-17", generation_config=MODEL_CONFIG) # gemini-1.5-flash,gemini-1.5-flash-8b
@@ -353,7 +359,7 @@ Return JSON with exactly these keys: {list(field_keyword_map.keys())}
 
  12. Life Assured Details
     - ** AXIS MAX LIFE INSURANCE LIMITED **
-        i. Dont't take Father's / Husband Name key word as Life assured name
+        i. Dont't take Father's / Husband Name as Life assured name
         ii. if the values are not present in this *LIFE TO BE INSURED(if other than proposer)* section consider Proposer details as the Life assured details
 Text:
 {text}
@@ -366,7 +372,6 @@ Text:
         print("Parsed::::",parsed)
         # print("cleaned",cleaned)
         # print("🧾 Gemini raw response:\n", response.text)
-        # print("parsed",parsed)
 
         # Fill any missing fields with None
         return {key: parsed.get(key, None) for key in field_keyword_map.keys()}
@@ -473,14 +478,14 @@ def set_status_based_on_date(output_data, date_field, status_field, past_or_toda
         output_data[status_field] = future_value
 
     return output_data
-
+json_list=[]
 def pdf_processing(pdf_content):
     try:
-        # 🔹 Step 1: Extract OCR text first
+        # 🔹 Extract OCR text first
         combined_full_text = extract_text_from_all_methods(pdf_content)
-        print("combined_full_text::::",combined_full_text)
+        # print("combined_full_text::::",combined_full_text)
 
-        # 🔹 Step 2: Check for keyword (optional)
+        # 🔹 Check for Agency keyword (optional) or Agency Code
         # if "vizza" not in combined_full_text.lower():
         #     return Response({"message": "Agency Name not found in document. Skipping processing."})
 
@@ -564,8 +569,18 @@ def pdf_processing(pdf_content):
             output_data["Proposer_Name"] = names.strip().title()
 
         # Annualised_Net_Premium
-        if output_data.get("Annualised_Net_Premium") == None and output_data.get("Total_Premium_With_Tax|Collected_premium") != None and output_data.get('GST_AMOUNT') != None:
-            output_data["Annualised_Net_Premium"] = str(str_to_float(output_data["Total_Premium_With_Tax|Collected_premium"])*12 - str_to_float(output_data["GST_AMOUNT"])*12)
+        if output_data.get("Frequency") and output_data.get("Frequency").lower() == "monthly":
+            if output_data.get("Annualised_Net_Premium") == None and output_data.get("Total_Premium_With_Tax|Collected_premium") != None and output_data.get('GST_AMOUNT') != None:
+                output_data["Annualised_Net_Premium"] = str(str_to_float(output_data["Total_Premium_With_Tax|Collected_premium"])*12 - str_to_float(output_data["GST_AMOUNT"])*12)
+        # elif output_data.get("Frequency") and output_data.get("Frequency").lower() in ["quarterly"]:
+        #     if output_data.get("Annualised_Net_Premium") == None and output_data.get("Total_Premium_With_Tax|Collected_premium") != None and output_data.get('GST_AMOUNT') != None:
+        #         output_data["Annualised_Net_Premium"] = str(str_to_float(output_data["Total_Premium_With_Tax|Collected_premium"])*12 - str_to_float(output_data["GST_AMOUNT"])*12)
+        # elif output_data.get("Frequency") and output_data.get("Frequency").lower() in ["halfyearly", "half yearly"]:
+        #     if output_data.get("Annualised_Net_Premium") == None and output_data.get("Total_Premium_With_Tax|Collected_premium") != None and output_data.get('GST_AMOUNT') != None:
+        #         output_data["Annualised_Net_Premium"] = str(str_to_float(output_data["Total_Premium_With_Tax|Collected_premium"])*12 - str_to_float(output_data["GST_AMOUNT"])*12)
+        # elif output_data.get("Frequency") and output_data.get("Frequency").lower() in ["yearly", "annual"]:
+        #     if output_data.get("Annualised_Net_Premium") == None and output_data.get("Total_Premium_With_Tax|Collected_premium") != None and output_data.get('GST_AMOUNT') != None:
+        #         output_data["Annualised_Net_Premium"] = str(str_to_float(output_data["Total_Premium_With_Tax|Collected_premium"])*12 - str_to_float(output_data["GST_AMOUNT"])*12)
 
         # Total_Premium_Without_Tax
         if output_data.get("Total_Premium_Without_Tax") == None and output_data.get("Total_Premium_With_Tax|Collected_premium") != None and output_data.get('GST_AMOUNT') != None:
@@ -590,91 +605,158 @@ def pdf_processing(pdf_content):
         #     output_data["GST_AMOUNT"] = str(str_to_float(output_data["Premium_Without_Tax"]) - str_to_float(output_data["Annualised_Net_Premium"]))
         
         print("Final_Output_data",output_data)
-        return Response(output_data)
+        json_list.append(output_data)
+        return json_list
     except Exception as e:
         print("❌ Error in background processing task:", str(e))
         return Response({"error": "Error in background processing task", "details": str(e)}, status=500)
     
-
 # ✅ Final Django View
-@csrf_exempt
-@api_view(["POST"])
-def life_background_processing(request):
-    # Remote URL using filename
-    filename = request.data.get("file")
-    base_url = "https://erpproject.blr1.cdn.digitaloceanspaces.com/live/life_salessheet/"
-    # base_url = "https://erpproject.blr1.digitaloceanspaces.com/live/general_datasheet/"
+# @csrf_exempt
+# @api_view(["POST"])
+# def life_background_processing(data):
+#     # Remote URL using filename
+#     filename = data["file"]
+#     base_url = "https://erpproject.blr1.cdn.digitaloceanspaces.com/live/life_salessheet/"
+#    # base_url = "https://erpproject.blr1.digitaloceanspaces.com/live/general_datasheet/"
+#     if isintance(filename, str):
+#         filename = filename.split(",")
+#         for file in filename:
+#             try:
+#                 if file:
+#                     file_url = base_url + quote(file)
+#                     print("📎 PDF URL:", file_url)
+#                     response = requests.get(file_url)
+#                     # print("response",response)
+#                     if response.status_code != 200:
+#                         print("Failed to download pdf")
+#                         return Response({"error": "Failed to download PDF"}, status=400)
 
-    try:
-        if filename:
-            file_url = base_url + quote(filename)
-            print("📎 PDF URL:", file_url)
-            response = requests.get(file_url)
-            # print(response)
-            if response.status_code != 200:
-                print("Failed to download pdf")
-                return Response({"error": "Failed to download PDF"}, status=400)
+                # pdf_content = response.content
+                # multi_up_json_list = pdf_processing(pdf_content)
+                # print(multi_up_json_list)
+                
+                # threading.Thread(target=pdf_processing, args=(temp_path,)).start()
+                # return Response({"Message":"Upload started, Proccessing in background..."},status=status.HTTP_202_ACCEPTED)
+#             except Exception as e:
+                # return Response({"error": str(e)}, status=500)
+            
+        # return Response({"file": multi_up_json_list}, status = 200)
 
-        pdf_content = response.content
-        # threading.Thread(target=pdf_processing, args=(temp_path,)).start()
-        # return Response({"Message":"Upload started, Proccessing in background..."},status=status.HTTP_202_ACCEPTED)
+    # if isintance(filename, list):
+        # for file in filename:
+            # try:
+                # if file:
+                    # file_url = base_url + quote(file)
+                    # print("📎 PDF URL:", file_url)
+                    # response = requests.get(file_url)
+                    # print(response)
+                    # if response.status_code != 200:
+                        # print("Failed to download pdf")
+                        # return Response({"error": "Failed to download PDF"}, status=400)
+                    
+                # pdf_content = response.content
+                # multi_up_json_list = pdf_processing(pdf_content)
+                # print(multi_up_json_list)
 
-        return pdf_processing(pdf_content)
-    
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
+                # threading.Thread(target=pdf_processing, args=(temp_path,)).start()
+                # return Response({"Message":"Upload started, Proccessing in background..."},status=status.HTTP_202_ACCEPTED)
+            # except Exception as e:
+                # return Response({"error": str(e)}, status=500)
+        
+        # return Response({"file": multi_up_json_list}, status = 200)
 
 
 # ✅ Final Django View
 # @csrf_exempt
 # @api_view(["POST"])
 # def life_background_processing(request):
+#     # Remote URL using filename
+#     filename = request.data.get("file")
 #     base_url = "https://erpproject.blr1.cdn.digitaloceanspaces.com/live/life_salessheet/"
-#     pdf_content = None
+#     # base_url = "https://erpproject.blr1.digitaloceanspaces.com/live/general_datasheet/"
 
 #     try:
-#         # Case 1: Remote PDF from URL
-#         filename = request.data.get("filename")
 #         if filename:
 #             file_url = base_url + quote(filename)
 #             print("📎 PDF URL:", file_url)
 #             response = requests.get(file_url)
-#             print(response)
+#             # print(response)
 #             if response.status_code != 200:
-#                 print("❌ Failed to download PDF")
+#                 print("Failed to download pdf")
 #                 return Response({"error": "Failed to download PDF"}, status=400)
-#             pdf_content = response.content
 
-#         # Case 2: Local PDF from upload (form-data file)
-#         elif 'file' in request.FILES:
-#             uploaded_file = request.FILES['file']
-#             pdf_content = uploaded_file.read()
-#             # print(f"📂 Local file uploaded: {uploaded_file.name}")
-            
-#             # Save locally
-#             upload_dir = os.path.join(settings.MEDIA_ROOT, "temp")
-#             os.makedirs(upload_dir, exist_ok=True)
-#             file_name = f"{uuid.uuid4()}.pdf"
-#             file_path = os.path.join(upload_dir, file_name)
+#         pdf_content = response.content
+#         # threading.Thread(target=pdf_processing, args=(temp_path,)).start()
+#         # return Response({"Message":"Upload started, Proccessing in background..."},status=status.HTTP_202_ACCEPTED)
 
-#             with open(file_path, 'wb') as f:
-#                 f.write(pdf_content)
-
-#             print(f"✅ Saved PDF to: {file_path}")
-
-#             # Optional: Open automatically (Windows only)
-#             os.startfile(file_path)
-
-#         else:
-#             return Response({"error": "No filename or file uploaded"}, status=400)
-
-#         # ✅ Proceed to process the PDF
 #         return pdf_processing(pdf_content)
-
+    
 #     except Exception as e:
-#         print("❌ Exception during processing:", str(e))
 #         return Response({"error": str(e)}, status=500)
 
-#     finally:
-#         if os.path.exists(file_path):
-#             os.remove(file_path)
+# ✅ Final Django View
+@csrf_exempt
+@api_view(["POST"])
+def life_background_processing(request):
+    base_url = "https://erpproject.blr1.cdn.digitaloceanspaces.com/live/life_salessheet/"
+    pdf_content = None
+    file_path = None
+    try:
+        # Case 1: Remote PDF from URL
+        filename = request.data.get("filename")
+        print(f"📂 Remote file uploaded: {filename}")
+        
+        if isinstance(filename, str):
+            filename = filename.split(",")
+            for file in filename:
+                file_url = base_url + quote(file)
+                print("📎 PDF URL:", file_url)
+                response = requests.get(file_url)
+                # print(response)
+                if response.status_code != 200:
+                    print("❌ Failed to download PDF")
+                    return Response({"error": "Failed to download PDF"}, status=400)
+                pdf_content = response.content
+
+                # Process
+                SI_or_MU_up_json_lisit = pdf_processing(pdf_content)
+                print("SI_or_MU_up_json_lisit:::",SI_or_MU_up_json_lisit)
+            return Response({"File Response" : SI_or_MU_up_json_lisit})
+
+        # Case 2: Local PDF from upload (form-data file)
+        elif 'file' in request.FILES:
+            uploaded_file = request.FILES.getlist('file') # ✅ Get list of local uploaded file
+            
+            # Save locally
+            upload_dir = os.path.join(settings.MEDIA_ROOT, "temp")
+            os.makedirs(upload_dir, exist_ok=True)
+
+            for file in uploaded_file:
+                print(f"📂 Local file uploaded: {file.name}")
+                pdf_content = file.read()
+
+                file_name = f"{uuid.uuid4()}.pdf"
+                file_path = os.path.join(upload_dir, file_name)
+
+                with open(file_path, 'wb') as f:
+                    f.write(pdf_content)
+                print(f"✅ Saved PDF to: {file_path}")
+
+
+                # Optional: Open automatically (Windows only)
+                os.startfile(file_path)
+
+                # Process
+                result = pdf_processing(pdf_content)
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                
+            return Response({"File Response": result})
+
+        else:
+            return Response({"error": "No filename or file uploaded"}, status=400)
+
+    except Exception as e:
+        print("❌ Exception during processing:", str(e))
+        return Response({"error": str(e)}, status=500)
